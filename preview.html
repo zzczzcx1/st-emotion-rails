@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Emotion Rails preview</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background:#1a1b26; color:#dcdde4; font-family:"Segoe UI",system-ui,sans-serif; margin:0; padding:28px 34px; width:760px; box-sizing:border-box; }
+  h1 { font-size:17px; color:#9ecbff; margin:0 0 4px; }
+  .sub { font-size:12px; color:#8b8d98; margin-bottom:18px; }
+  .mes { border-top:1px solid #2c2d3a; padding:14px 6px 10px; }
+  .ch_name { font-weight:700; font-size:13px; margin-bottom:6px; }
+  .mes_text { font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
+  .mes_text p { margin:0 0 10px; }
+</style>
+</head>
+<body>
+<h1>Emotion Rails · 消息侧栏预览</h1>
+<div class="sub">行首 [情绪词] 驱动 · 正文 DOM 零改动（标签保留在原文）</div>
+
+<div class="mes" mesid="3">
+  <div class="mes_block">
+    <div class="ch_name">Lily</div>
+    <div class="er-rail">
+      <div class="er-chip" title="开心"><img class="er-chip-img" src="examples/zh/avatars/开心.svg" width="64" height="64" alt="开心"><span class="er-chip-label">开心</span></div>
+      <div class="er-chip" title="害羞"><img class="er-chip-img" src="examples/zh/avatars/害羞.svg" width="64" height="64" alt="害羞"><span class="er-chip-label">害羞</span></div>
+    </div>
+    <div class="mes_text"><p>[开心] 你来啦！我刚好烤了一盘曲奇，还是热的呢。</p>
+    <p>[害羞] 那、那个……周末要不要一起去看海？就我们两个。</p></div>
+  </div>
+</div>
+
+<div class="mes" mesid="4">
+  <div class="mes_block">
+    <div class="ch_name">User</div>
+    <div class="mes_text"><p>当然好啊，我一直想和你去海边。</p></div>
+  </div>
+</div>
+
+<div class="mes" mesid="5">
+  <div class="mes_block">
+    <div class="ch_name">Lily</div>
+    <div class="er-rail">
+      <div class="er-chip" title="惊讶"><img class="er-chip-img" src="examples/zh/avatars/惊讶.svg" width="64" height="64" alt="惊讶"><span class="er-chip-label">惊讶</span></div>
+      <div class="er-chip" title="得意"><img class="er-chip-img" src="examples/zh/avatars/得意.svg" width="64" height="64" alt="得意"><span class="er-chip-label">得意</span></div>
+    </div>
+    <div class="mes_text"><p>[惊讶] 咦？答应得这么干脆……我还准备了三套说服你的台词。</p>
+    <p>[得意] 哼哼，那就这么说定了！周六早上七点，海边见～</p></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,41 @@
+{
+ "fallback": "calm",
+ "happy": {
+  "img": "avatars/happy.svg"
+ },
+ "calm": {
+  "img": "avatars/calm.svg"
+ },
+ "surprised": {
+  "img": "avatars/surprised.svg"
+ },
+ "shy": {
+  "img": "avatars/shy.svg"
+ },
+ "angry": {
+  "img": "avatars/angry.svg"
+ },
+ "sad": {
+  "img": "avatars/sad.svg"
+ },
+ "thinking": {
+  "img": "avatars/thinking.svg"
+ },
+ "confused": {
+  "img": "avatars/confused.svg"
+ },
+ "proud": {
+  "img": "avatars/proud.svg"
+ },
+ "hurt": {
+  "img": "avatars/hurt.svg"
+ },
+ "aliases": {
+  "glad": "happy",
+  "excited": "happy",
+  "pensive": "thinking",
+  "lost": "confused",
+  "upset": "angry",
+  "unhappy": "sad"
+ }
+}

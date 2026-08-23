@@ -1,0 +1,41 @@
+{
+ "fallback": "平静",
+ "开心": {
+  "img": "avatars/开心.svg"
+ },
+ "平静": {
+  "img": "avatars/平静.svg"
+ },
+ "惊讶": {
+  "img": "avatars/惊讶.svg"
+ },
+ "害羞": {
+  "img": "avatars/害羞.svg"
+ },
+ "生气": {
+  "img": "avatars/生气.svg"
+ },
+ "悲伤": {
+  "img": "avatars/悲伤.svg"
+ },
+ "思考": {
+  "img": "avatars/思考.svg"
+ },
+ "困惑": {
+  "img": "avatars/困惑.svg"
+ },
+ "得意": {
+  "img": "avatars/得意.svg"
+ },
+ "委屈": {
+  "img": "avatars/委屈.svg"
+ },
+ "aliases": {
+  "高兴": "开心",
+  "激动": "开心",
+  "沉思": "思考",
+  "迷茫": "困惑",
+  "不悦": "生气",
+  "伤心": "悲伤"
+ }
+}
