@@ -18,6 +18,17 @@ v1 rendered a single left-float *rail* of avatar chips; because the chips had a 
 
 > Breaking change from v1: the extension now restructures the message text DOM (`.mes_text`) instead of rendering a sibling rail. See *Coexistence* below if you run another extension that also rewrites message text.
 
+## Origin: built so emotion avatars and per-sentence TTS can coexist
+
+This extension exists because in our local-agent roleplay setup, **per-sentence TTS emotion control and custom expression avatars needed to share one vocabulary**:
+
+- Character reply lines start with cues like `[开心]`. The TTS side consumes **the same words** to switch per-sentence emotion reference audio — so avatars must be driven by that very word list. The official [Character Expressions](https://docs.sillytavern.app/extensions/expression-images/) extension is message-level only and uses a fixed English label set + classifier, so it can't hook into a shared custom vocabulary.
+- The TTS extension injects its per-sentence player UI **inside** `.mes_text`. v1 therefore rendered as a sibling rail and never touched message text DOM. **v2's segment layout does restructure `.mes_text`** — so coexistence is now enforced by design: idempotent re-rendering (content hash), a MutationObserver that rebuilds the segments if another extension rewrites the text, preserved `data-*` markers, and a generation-streaming gate that never interrupts the typewriter (verified alongside a per-sentence TTS player on ST 1.18).
+- The agent replies through an OpenAI-compatible streaming endpoint; its media-inclusion mechanism passes raw directives through as plain text while streaming, so images cannot be delivered that way — rendering must happen client-side, from the tags themselves.
+- Both sides fall back silently (the TTS backend quietly drops to neutral audio when an emotion word is missing; this extension quietly falls back to the fallback word). Vocabulary drift between the two was painful to debug — hence one shared `emotions.json` with aliases as the single source of truth.
+
+**You don't need any of that infrastructure**: Emotion Rails runs standalone with any word list you put in `emotions.json`.
+
 ## Features
 
 - 🏷️ **Tag-driven**: lines starting with `[happy]`, `[害羞]`, … get their own avatar + speech bubble; unknown words silently fall back (whitelist → alias → fallback word).
@@ -122,6 +133,17 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 头像永远贴在各自段落的左侧，结构上不可能再错位。行首方括号组（`[开心]` 或 `[角色][情绪][场景]`）**从显示中隐藏**（移入隐藏 span），但**不改底层聊天数据**——正则替换、导出、复制看到的仍是原文。
 
 > 相对 v1 的破坏性变更：本扩展现在会重组消息正文 DOM（`.mes_text`），而不再是渲染侧栏兄弟节点。若你同时使用其它改写消息正文的扩展，请阅读下方"共存"说明。
+
+## 缘起：为「表情头像 × 逐句 TTS」共存而生
+
+本插件源起于本地 agent 驱动的酒馆 RP 场景：**逐句 TTS 情绪控制与自定义表情头像需要共用同一份词表**——
+
+- 角色台词行首带 `[开心]` 这类情绪词，TTS 侧用**同一套词**切换逐句情绪参考音频——头像必须吃同一份词表。官方 [Character Expressions](https://docs.sillytavern.app/extensions/expression-images/) 是消息级整图 + 固定英文标签集 + 分类器路线，接不上自定义共享词表。
+- TTS 扩展会在 `.mes_text` **内部**注入逐句播放按钮。v1 因此把侧栏渲染为兄弟节点、从不碰正文 DOM；**v2 的分段布局确实会重组 `.mes_text`**，所以共存改为"机制保障"：内容哈希幂等重排 + MutationObserver 检测他方重写后自动重建 + 保留 `data-*` 标记 + 流式生成期挂起不打断打字机（已在 1.18 上与逐句播放器实测共存）。
+- agent 走 OpenAI 兼容流式接口回复；流式下其媒体内嵌机制会把原始指令当纯文本透传，图片没法走那条路——渲染只能在酒馆前端由标签驱动完成，这正是本插件做的事。
+- 两端都有静默回落（TTS 后端情绪词缺失时悄悄退回中性音色；本插件未识别词悄悄退回兜底词），两边词表一旦漂移极难排查——所以用一份带别名的 `emotions.json` 作为唯一真源。
+
+**不搭这套基础设施也完全能用**：Emotion Rails 单独即可运行，`emotions.json` 词表随你放。
 
 ## 特性
 
