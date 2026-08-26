@@ -20,7 +20,8 @@
     align-items: center;
     gap: 3px;
     flex: 0 0 auto;
-    width: calc(var(--mainFontSize, 15px) * 4); /* room for the word label */
+    min-width: 0; /* let content (avatar image) size the column: no fixed width,
+                     otherwise a wide avatar overflows and overlaps the bubble */
 }
 
 .er-ava-img {
