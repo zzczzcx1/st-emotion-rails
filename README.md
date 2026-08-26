@@ -29,6 +29,8 @@ This extension exists because in our local-agent roleplay setup, **per-sentence 
 
 **You don't need any of that infrastructure**: Emotion Rails runs standalone with any word list you put in `emotions.json`.
 
+![preview](docs/preview.png)
+
 ## Features
 
 - 🏷️ **Tag-driven**: lines starting with `[happy]`, `[害羞]`, … get their own avatar + speech bubble; unknown words silently fall back (whitelist → alias → fallback word).
@@ -144,6 +146,8 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 - 两端都有静默回落（TTS 后端情绪词缺失时悄悄退回中性音色；本插件未识别词悄悄退回兜底词），两边词表一旦漂移极难排查——所以用一份带别名的 `emotions.json` 作为唯一真源。
 
 **不搭这套基础设施也完全能用**：Emotion Rails 单独即可运行，`emotions.json` 词表随你放。
+
+![preview](docs/preview.png)
 
 ## 特性
 
