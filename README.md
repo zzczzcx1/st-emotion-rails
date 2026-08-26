@@ -106,7 +106,7 @@ These cost us a debugging session — save yours (verified on ST 1.18.x):
 ## Troubleshooting
 
 - **No segments at all** → check the extension is enabled in the Extensions panel (a disabled entry persists server-side in `settings.json → extension_settings.disabledExtensions`; a hard refresh won't fix that). Then check the console for `[emotionRails]` logs and make sure `${baseUrl}emotions.json` returns HTTP 200.
-- **Only the first segment has an avatar** → something re-rendered the message with the old `<br>`-splitting shape in between… no wait: this is the classic symptom of the extension *not* being the v2 rewrite, or of broken markdown structure. Hard-refresh after updating.
+- **Only the first segment has an avatar** → the page is probably still serving a cached older build; hard-refresh (**Ctrl+F5**) after updating (or clear the service-worker cache).
 - **Tags stay visible** → the first node of the line is not a plain text node (rare). The extension hides whole-element tags as a fallback; report it with an `outerHTML` sample.
 - **Segments come back after a swipe but text is doubled** → another extension rewrote `.mes_text` without preserving markers; check their re-render order (ours re-renders 500 ms after any change).
 
@@ -207,7 +207,7 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 ## 排障
 
 - **完全不显示** → 先看扩展面板是否被禁用（禁用状态持久化在服务器 `settings.json` 的 `disabledExtensions` 里，硬刷新无效）；再看 console 有没有 `[emotionRails]` 日志；最后确认 `${baseUrl}emotions.json` 返回 200。
-- **只有第一段有头像** → 常见于页面还缓存着旧版脚本；升级后 **Ctrl+F5** 硬刷新（或临时手动清 service worker 缓存）。
+- **只有第一段有头像** → 页面很可能还在执行旧版缓存脚本；升级后 **Ctrl+F5** 硬刷新（或临时清一次 service worker 缓存）。
 - **标签仍显示在正文里** → 该行首节点不是纯文本节点（少见）；扩展会作整元素隐藏兜底；如仍复现请附带 `outerHTML` 片段反馈。
 - **滑动后分段回来了但正文重复** → 别的扩展重写了 `.mes_text` 且没保留标记；我们会在任何变更后 500ms 自动重排，检查两者的事件顺序。
 
