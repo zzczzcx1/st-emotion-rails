@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "zzczzcx1",
-  "version": "1.0.0",
-  "description": "Render an avatar rail beside character messages from [emotion] tags. Word list, images and aliases come from one emotions.json. Zero-intrusion: message text DOM is never modified."
+  "version": "2.0.0",
+  "description": "Per-segment emotion avatars aligned with their own speech lines from [emotion] tags: each tagged line becomes an avatar + word label beside its speech bubble. Word list, images and aliases come from one emotions.json. Tags are hidden from display without touching chat data. Compatible with per-sentence TTS players and other .mes_text rewriting extensions."
 }

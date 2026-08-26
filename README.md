@@ -1,33 +1,31 @@
 # Emotion Rails
 
-**Render a per-message emotion avatar rail beside character messages in SillyTavern, driven by `[word]` tags.**
+**Render a per-segment emotion avatar beside character messages in SillyTavern, driven by `[emotion-word]` tags at line starts.**
 
 English | [中文](#中文说明)
 
 ---
 
-## Origin: built for an agent × TTS pipeline
+## v2.0.0: from sidebar rail to tag-aligned segments
 
-This extension exists because in our local-agent ("Hermes") roleplay setup, **per-sentence TTS emotion control and custom expression avatars could not coexist**:
+v1 rendered a single left-float *rail* of avatar chips; because the chips had a fixed pitch while paragraphs varied in height, chips drifted away from their own lines. **v2 replaces the rail with a segmented layout**: each tagged line (plus any untagged narration that follows it) becomes one row of
 
-- Character reply lines start with cues like `[开心]`. The TTS side consumes **the same words** to switch per-sentence emotion reference audio — so avatars must be driven by that very word list. The official [Character Expressions](https://docs.sillytavern.app/extensions/expression-images/) extension is message-level only and uses a fixed English label set + classifier, so it can't hook into a shared custom vocabulary.
-- The TTS browser extension injects its per-sentence player UI **inside** `.mes_text`. Any expression extension that rewrites `.mes_text` destroys it (and gets destroyed in return). Emotion Rails therefore renders as a sibling rail and never touches message text DOM.
-- The agent replies through an OpenAI-compatible streaming endpoint; while streaming, its media-inclusion mechanism passes raw directives through as plain text, so images cannot be delivered that way — rendering must happen client-side, from the tags themselves. That is exactly what this extension does.
-- Both sides fall back silently (the TTS backend quietly drops to neutral audio when an emotion word is missing; this extension quietly falls back to the fallback chip). Vocabulary drift between the two was painful to debug — hence one shared `emotions.json` with aliases as the single source of truth.
+```
+[emotion avatar + word label] | [speech bubble]
+```
 
-**You don't need any of that infrastructure**: Emotion Rails runs standalone with any word list you put in `emotions.json`.
+…so every avatar sits exactly beside its own lines and can never misalign. The leading bracket groups (`[happy]` or `[Name][happy][scene]`) are hidden from display (moved into a hidden span) **without touching the underlying chat data** — regex, export and copy still see the original text.
 
-Emotion Rails parses `[emotion-word]` cues at the start of your character's reply lines and renders a compact avatar rail beside each message segment. The word list, image mapping and aliases all live in **one `emotions.json`** — add or remove emotions without touching any code.
-
-![preview](docs/preview.png)
+> Breaking change from v1: the extension now restructures the message text DOM (`.mes_text`) instead of rendering a sibling rail. See *Coexistence* below if you run another extension that also rewrites message text.
 
 ## Features
 
-- 🏷️ **Tag-driven**: lines starting with `[happy]`, `[害羞]`, … get their own avatar chip; unknown words silently fall back (whitelist → alias → fallback word).
-- 🛤️ **Rail layout**: avatars stack vertically on the left of the message, text wraps naturally.
-- 🧩 **Zero-intrusion**: the rail is a *sibling* of `.mes_text` — message text DOM is never rewritten, so markdown, quote styling, display-only regex and other extensions' per-message UI (e.g. TTS sentence players) keep working.
-- 📦 **Data-driven**: whitelist, aliases and fallback are all defined in `emotions.json`. No hardcoded vocabulary.
-- 🔁 **Always fresh**: full-history render on chat load; instant re-render on edit and swipe; consecutive duplicate words collapse into one chip.
+- 🏷️ **Tag-driven**: lines starting with `[happy]`, `[害羞]`, … get their own avatar + speech bubble; unknown words silently fall back (whitelist → alias → fallback word).
+- 📐 **Tag-aligned segments**: avatar column is part of each segment, so it tracks its own lines — no float drift, no pitch math.
+- 🕶️ **Tag hiding**: `[word]` prefixes are hidden from display; chat data is never modified.
+- 🧩 **Coexistence**: rendering is idempotent (content-hash guard) and a MutationObserver re-renders a message when another extension rewrites `.mes_text`; the observer suspends during streaming generation so the typewriter is never interrupted; other extensions' DOM markers (`data-*` on `.mes_text`, injected node attributes) are preserved.
+- 📦 **Data-driven**: whitelist, aliases and fallback are all defined in one `emotions.json`. No hardcoded vocabulary.
+- 🔁 **Always fresh**: full-history render on chat load; instant re-render on edit/swipe; ST's persistent left avatar is hidden on segmented messages (each segment has its own).
 
 ## Install
 
@@ -48,7 +46,7 @@ Manual alternative: clone into `data/<user-handle>/extensions/st-emotion-rails/`
    ```
    Replace the placeholder SVGs with your own images later — any browser-renderable format works (`png`/`webp`/`svg`); either name files `<word>.png` or point to them explicitly in `emotions.json`.
 3. Hard-refresh the SillyTavern page (**Ctrl+F5**).
-4. Send a test message as the character, e.g. `[happy] Hello there!` — a chip should appear on the left.
+4. Send a test message as the character, e.g. `[happy] Hello there!` — the line should render as an avatar + speech bubble row.
 
 ## `emotions.json` format
 
@@ -78,22 +76,28 @@ Stored under `extension_settings.emotionRails`:
 | `index` | `emotions.json` | Index file name |
 | `defaultWord` | *(empty)* | Overrides `fallback` from the JSON |
 | `showChip` | `true` | Show the word label under each avatar |
-| `size` | `64` | Avatar size in px |
+| `size` | `84` | Segment avatar size in px |
+| `hideStAvatar` | `true` | Hide ST's persistent left avatar on segmented messages |
+| `bubble` | `true` | Speech-bubble background behind segment text |
 
 ## For extension developers: the ST message contract
 
-These cost us a debugging session — save yours:
+These cost us a debugging session — save yours (verified on ST 1.18.x):
 
 - `CHARACTER_MESSAGE_RENDERED` / `MESSAGE_EDITED` / `MESSAGE_SWIPED` emit **positional args** `(messageId, type)` where `messageId` is the **array index** — not `{ messageId }`.
 - Chat items have **no `id` field**; the array index *is* the message id.
 - Message blocks locate via the bare attribute `.mes[mesid="<index>"]` — there are **no `data-*` attributes**.
 - `GENERATION_ENDED` passes `chat.length` (not an index).
+- ⚠ **`messageFormatting` renders each line as a `<p>` element** — `showdown` `simpleLineBreaks` only converts in-line `\n` to `<br>`; blank lines delimit paragraphs, so there are **no `<br>` children at the `.mes_text` top level**. Any code that splits message text on `<br>` gets one giant "line" and misbehaves. (A streaming typewriter may briefly produce the raw `<br>` shape — support both.)
 - Loading an existing chat fires **no render events** — rescan the whole chat yourself on `CHAT_CHANGED`/startup.
+- Other extensions may rewrite `.mes_text` asynchronously (e.g. per-sentence TTS players polling after render events). Re-render idempotently and preserve `dataset` markers, or the two extensions will fight forever.
 
 ## Troubleshooting
 
-- **No rail at all** → check the extension is enabled in the Extensions panel (a disabled entry persists server-side in `settings.json → extension_settings.disabledExtensions`; a hard refresh won't fix that). Then check the console for `[emotionRails]` logs and make sure `${baseUrl}emotions.json` returns HTTP 200.
-- **Tags stay visible but no new chip appears** → the word isn't whitelisted and has no alias; the line falls back to the fallback word's chip. Add the word or an alias.
+- **No segments at all** → check the extension is enabled in the Extensions panel (a disabled entry persists server-side in `settings.json → extension_settings.disabledExtensions`; a hard refresh won't fix that). Then check the console for `[emotionRails]` logs and make sure `${baseUrl}emotions.json` returns HTTP 200.
+- **Only the first segment has an avatar** → something re-rendered the message with the old `<br>`-splitting shape in between… no wait: this is the classic symptom of the extension *not* being the v2 rewrite, or of broken markdown structure. Hard-refresh after updating.
+- **Tags stay visible** → the first node of the line is not a plain text node (rare). The extension hides whole-element tags as a fallback; report it with an `outerHTML` sample.
+- **Segments come back after a swipe but text is doubled** → another extension rewrote `.mes_text` without preserving markers; check their re-render order (ours re-renders 500 ms after any change).
 
 Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an issue is appreciated.
 
@@ -105,26 +109,28 @@ Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an
 
 # 中文说明
 
-**在 SillyTavern 里，按角色台词行首的 `[情绪词]` 标签，在消息旁边渲染一条头像侧栏。**
+**在 SillyTavern 里，按角色台词行首的 `[情绪词]` 标签，将消息渲染成"每段头像+词标签 | 台词气泡"的贴正文分段样式。**
 
-## 缘起：为 agent × TTS 联动而生
+## v2.0.0：从侧栏 rail 改为贴正文分段
 
-本插件源于本地 agent（Hermes）驱动的酒馆 RP 场景：**逐句 TTS 情绪控制与自定义表情头像无法共存**——
+v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chip 间距固定而段落高度不一，头像会逐步漂离自己的台词。**v2 改为分段布局**：每个带标签的行（及其后跟随的叙述行）组成一行
 
-- 角色台词行首带 `[开心]` 这类情绪词，TTS 侧用**同一套词**切换逐句情绪参考音频——头像必须吃同一份词表。官方 [Character Expressions](https://docs.sillytavern.app/extensions/expression-images/) 是消息级整图 + 固定英文标签集 + 分类器路线，接不上自定义共享词表。
-- TTS 扩展会在 `.mes_text` **内部**注入逐句播放按钮；任何改写 `.mes_text` 的表情扩展都会与它互相毁灭。Emotion Rails 因此以兄弟节点侧栏渲染，正文 DOM 零改动。
-- agent 走 OpenAI 兼容流式接口回复；流式下其媒体内嵌机制会把原始指令当纯文本透传，图片没法走那条路——渲染只能在酒馆前端由标签驱动完成，这正是本插件做的事。
-- 两端都有静默回落（TTS 后端情绪词缺失时悄悄退回中性音色；本插件未识别词悄悄退回兜底 chip），两边词表一旦漂移极难排查——所以用一份带别名的 `emotions.json` 作为唯一真源。
+```
+[表情头像 + 情绪词标签] | [台词气泡]
+```
 
-**不搭这套基础设施也完全能用**：Emotion Rails 单独即可运行，`emotions.json` 词表随你放。
+头像永远贴在各自段落的左侧，结构上不可能再错位。行首方括号组（`[开心]` 或 `[角色][情绪][场景]`）**从显示中隐藏**（移入隐藏 span），但**不改底层聊天数据**——正则替换、导出、复制看到的仍是原文。
+
+> 相对 v1 的破坏性变更：本扩展现在会重组消息正文 DOM（`.mes_text`），而不再是渲染侧栏兄弟节点。若你同时使用其它改写消息正文的扩展，请阅读下方"共存"说明。
 
 ## 特性
 
-- 🏷️ **标签驱动**：`[开心]` `[惊讶]` 等行首标签各自出头像 chip；词表外词汇按 白名单→别名→兜底词 静默回落。
-- 🛤️ **侧栏布局**：头像沿消息左侧竖排，正文自然环绕。
-- 🧩 **零侵入**：轨道是 `.mes_text` 的**兄弟节点**，从不改写消息正文 DOM——Markdown、引用样式、仅显示 regex 以及其它扩展的消息内 UI（如 TTS 逐句播放按钮）完全不受影响。
+- 🏷️ **标签驱动**：`[开心]` `[惊讶]` 等行首标签各行渲染为"头像 + 台词气泡"；词表外词汇按 白名单 → 别名 → 兜底词 静默回落。
+- 📐 **贴正文分段**：头像列是每段自身的一部分，跟着自己的段落走——没有浮动漂移、没有间距计算。
+- 🕶️ **标签隐藏**：`[词]` 前缀从显示中隐藏；聊天数据零改动。
+- 🧩 **共存**：渲染幂等（内容哈希防抖）；MutationObserver 检测到其它扩展重写 `.mes_text` 后自动重排；流式生成期间观察器挂起，不打断打字机；其它扩展在 DOM 上的标记（`data-*`、节点注入属性）原样保留。
 - 📦 **数据驱动**：白名单/别名/兜底词全部在一个 `emotions.json` 里，增删情绪不改代码。
-- 🔁 **始终新鲜**：聊天加载全历史补渲染；编辑/滑动即时重渲染；连续同词折叠成一个 chip。
+- 🔁 **始终新鲜**：聊天加载全历史补渲染；编辑/滑动即时重渲染；分段消息上自动隐藏酒馆左侧常驻头像（每段自带头像）。
 
 ## 安装
 
@@ -135,7 +141,7 @@ Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an
 1. 建素材目录 `data/<用户>/images/emotion-rails/`
 2. 拷入任意一套示例包（`examples/zh/*` 或 `examples/en/*`），保持 `emotions.json + avatars/` 结构；之后可随时把占位 SVG 换成自己的 png/webp 图（文件名 `<词>.png` 或在 json 里显式指定）。
 3. **Ctrl+F5** 硬刷新页面。
-4. 让角色发一条 `[开心] 测试消息` —— 左侧应出现头像 chip。
+4. 让角色发一条 `[开心] 测试消息` —— 该行应渲染成"头像+气泡"行。
 
 ## `emotions.json` 格式
 
@@ -151,10 +157,37 @@ Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an
 - `aliases`：别名 → 规范词（模型输出 `[激动]` 但你只有「开心」的图时很有用）
 - `fallback`：无标签行与未识别词的兜底词（设置里的 `defaultWord` 可覆盖它）
 
+## 扩展设置
+
+存于 `extension_settings.emotionRails`：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `enabled` | `true` | 总开关 |
+| `baseUrl` | `/user/images/emotion-rails/` | `emotions.json` 与图片所在目录 |
+| `index` | `emotions.json` | 索引文件名 |
+| `defaultWord` | *(空)* | 覆盖 JSON 里的 `fallback` |
+| `showChip` | `true` | 头像下方显示情绪词标签 |
+| `size` | `84` | 段头像边长(px) |
+| `hideStAvatar` | `true` | 分段消息上隐藏 ST 常驻左侧头像 |
+| `bubble` | `true` | 台词气泡背景 |
+
+## 写给扩展开发者：ST 消息契约（1.18.x 实测）
+
+这些坑我们调试了很久——帮你省一下：
+
+- `CHARACTER_MESSAGE_RENDERED` / `MESSAGE_EDITED` / `MESSAGE_SWIPED` 是**位置参数** `(messageId, type)`，其中 `messageId` 是**数组下标**——不是 `{ messageId }` 对象。
+- 聊天条目**没有 `id` 字段**；数组下标就是消息 id。
+- 消息块的选择器是裸属性 `.mes[mesid="<下标>"]`——**没有 `data-*` 属性**。
+- `GENERATION_ENDED` 传的是 `chat.length`（不是下标）。
+- ⚠ **`messageFormatting` 把每一行渲染成一个 `<p>` 元素**——`showdown` 的 `simpleLineBreaks` 只把行内 `\n` 转 `<br>`，空行是段落分隔，所以 `.mes_text` 顶层**没有 `<br>` 子节点**。任何按 `<br>` 切分的代码都会把整条消息当成"一行"然后出问题。（流式打字机中间态可能短暂是 `<br>` 形态——两种都兼容。）
+
 ## 排障
 
 - **完全不显示** → 先看扩展面板是否被禁用（禁用状态持久化在服务器 `settings.json` 的 `disabledExtensions` 里，硬刷新无效）；再看 console 有没有 `[emotionRails]` 日志；最后确认 `${baseUrl}emotions.json` 返回 200。
-- **标签还留在正文里但没出新 chip** → 该词不在白名单也无别名，已按兜底词回落；加词或加别名即可。
+- **只有第一段有头像** → 常见于页面还缓存着旧版脚本；升级后 **Ctrl+F5** 硬刷新（或临时手动清 service worker 缓存）。
+- **标签仍显示在正文里** → 该行首节点不是纯文本节点（少见）；扩展会作整元素隐藏兜底；如仍复现请附带 `outerHTML` 片段反馈。
+- **滑动后分段回来了但正文重复** → 别的扩展重写了 `.mes_text` 且没保留标记；我们会在任何变更后 500ms 自动重排，检查两者的事件顺序。
 
 已在 SillyTavern **1.18.x** 实测；其它版本欢迎反馈 issue。
 

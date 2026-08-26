@@ -10,23 +10,27 @@
   .sub { font-size:12px; color:#8b8d98; margin-bottom:18px; }
   .mes { border-top:1px solid #2c2d3a; padding:14px 6px 10px; }
   .ch_name { font-weight:700; font-size:13px; margin-bottom:6px; }
-  .mes_text { font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
-  .mes_text p { margin:0 0 10px; }
+  .er-body { font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
+  .er-taghide { display:none; }
 </style>
 </head>
 <body>
-<h1>Emotion Rails · 消息侧栏预览</h1>
-<div class="sub">行首 [情绪词] 驱动 · 正文 DOM 零改动（标签保留在原文）</div>
+<h1>Emotion Rails · 贴正文分段预览 (v2)</h1>
+<div class="sub">行首 [情绪词] 驱动 · 每段「头像+词标签 | 台词气泡」· 标签隐藏不删数据</div>
 
 <div class="mes" mesid="3">
   <div class="mes_block">
     <div class="ch_name">Lily</div>
-    <div class="er-rail">
-      <div class="er-chip" title="开心"><img class="er-chip-img" src="examples/zh/avatars/开心.svg" width="64" height="64" alt="开心"><span class="er-chip-label">开心</span></div>
-      <div class="er-chip" title="害羞"><img class="er-chip-img" src="examples/zh/avatars/害羞.svg" width="64" height="64" alt="害羞"><span class="er-chip-label">害羞</span></div>
+    <div class="mes_text">
+      <div class="er-seg">
+        <div class="er-ava"><img class="er-ava-img" src="examples/zh/avatars/开心.svg" width="84" height="84" alt="开心"><span class="er-word">开心</span></div>
+        <div class="er-body"><span class="er-taghide">[开心]</span> 你来啦！我刚好烤了一盘曲奇，还是热的呢。<q>先尝尝这个。</q></div>
+      </div>
+      <div class="er-seg">
+        <div class="er-ava"><img class="er-ava-img" src="examples/zh/avatars/害羞.svg" width="84" height="84" alt="害羞"><span class="er-word">害羞</span></div>
+        <div class="er-body"><span class="er-taghide">[害羞]</span> 那、那个……周末要不要一起去看海？<q>就我们两个。</q><br>她低着头，指尖绞着衣角，耳尖慢慢红了。</div>
+      </div>
     </div>
-    <div class="mes_text"><p>[开心] 你来啦！我刚好烤了一盘曲奇，还是热的呢。</p>
-    <p>[害羞] 那、那个……周末要不要一起去看海？就我们两个。</p></div>
   </div>
 </div>
 
@@ -40,13 +44,19 @@
 <div class="mes" mesid="5">
   <div class="mes_block">
     <div class="ch_name">Lily</div>
-    <div class="er-rail">
-      <div class="er-chip" title="惊讶"><img class="er-chip-img" src="examples/zh/avatars/惊讶.svg" width="64" height="64" alt="惊讶"><span class="er-chip-label">惊讶</span></div>
-      <div class="er-chip" title="得意"><img class="er-chip-img" src="examples/zh/avatars/得意.svg" width="64" height="64" alt="得意"><span class="er-chip-label">得意</span></div>
+    <div class="mes_text">
+      <div class="er-seg">
+        <div class="er-ava"><img class="er-ava-img" src="examples/zh/avatars/惊讶.svg" width="84" height="84" alt="惊讶"><span class="er-word">惊讶</span></div>
+        <div class="er-body"><span class="er-taghide">[惊讶]</span> 咦？答应得这么干脆……<q>我还准备了三套说服你的台词。</q></div>
+      </div>
+      <div class="er-seg">
+        <div class="er-ava"><img class="er-ava-img" src="examples/zh/avatars/得意.svg" width="84" height="84" alt="得意"><span class="er-word">得意</span></div>
+        <div class="er-body"><span class="er-taghide">[得意]</span> 哼哼，那就这么说定了！<q>周六早上七点，海边见～</q></div>
+      </div>
     </div>
-    <div class="mes_text"><p>[惊讶] 咦？答应得这么干脆……我还准备了三套说服你的台词。</p>
-    <p>[得意] 哼哼，那就这么说定了！周六早上七点，海边见～</p></div>
   </div>
 </div>
+
+<p style="color:#8b8d98;font-size:12px;margin-top:20px">上：角色多段消息（每段=头像+词标签+气泡，叙述并入同段） · 中：用户消息不受影响 · 下：连续多段。占位图来自 examples/zh，可替换为任意 png/webp/svg。</p>
 </body>
 </html>
