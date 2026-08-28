@@ -6,6 +6,12 @@ English | [中文](#中文说明)
 
 ---
 
+## v2.1.0: multi-character vocabularies + missing-art placeholders
+
+- **Per-character**: each message resolves its vocabulary from `mes.ch_name` — `${baseUrl}<character>/emotions.json` (+ its image files) is probed first, then the global `${baseUrl}emotions.json`; if neither exists the character's messages are left completely untouched (ST default rendering). Vocabularies are cached per character; set `perCharacter: false` to use the global list only.
+- **Missing art never remaps**: when a word's image file 404s, the segment shows a blank placeholder (inline SVG, no network) instead of borrowing another word's avatar. The word label still shows the intended word.
+- Word-list `img` values may be absolute URLs or `data:` URIs — used as-is (handy for inline mock art or asset CDNs).
+
 ## v2.0.0: from sidebar rail to tag-aligned segments
 
 v1 rendered a single left-float *rail* of avatar chips; because the chips had a fixed pitch while paragraphs varied in height, chips drifted away from their own lines. **v2 replaces the rail with a segmented layout**: each tagged line (plus any untagged narration that follows it) becomes one row of
@@ -74,7 +80,7 @@ Manual alternative: clone into `data/<user-handle>/extensions/st-emotion-rails/`
 
 | Key | Meaning |
 |---|---|
-| `<word>` | Emotion word exactly as used inside `[...]`. Value: `{ "img": "<path relative to baseUrl>" }` |
+| `<word>` | Emotion word exactly as used inside `[...]`. Value: `{ "img": "<path relative to baseUrl>" }` — absolute `http(s):`/`data:`/`blob:` URLs are used as-is |
 | `aliases` | Extra words mapped to a canonical word (e.g. the model writes `[excited]` but you only have art for `happy`) |
 | `fallback` | Word used for untagged lines and unrecognized words (overridden by the `defaultWord` setting if set) |
 
@@ -85,13 +91,28 @@ Stored under `extension_settings.emotionRails`:
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master switch |
-| `baseUrl` | `/user/images/emotion-rails/` | Where `emotions.json` and images live |
+| `baseUrl` | `/user/images/emotion-rails/` | Where `emotions.json` and images live; per-character subfolders go under it |
 | `index` | `emotions.json` | Index file name |
+| `perCharacter` | `true` | Probe `${baseUrl}<character>/emotions.json` first, then the global list |
 | `defaultWord` | *(empty)* | Overrides `fallback` from the JSON |
 | `showChip` | `true` | Show the word label under each avatar |
 | `size` | `84` | Segment avatar size in px |
 | `hideStAvatar` | `true` | Hide ST's persistent left avatar on segmented messages |
 | `bubble` | `true` | Speech-bubble background behind segment text |
+| `placeholder` | `true` | Missing art shows a blank placeholder (never remapped to another word's avatar) |
+
+**Per-character layout** (with `perCharacter: true`):
+
+```
+user/images/emotion-rails/
+├── emotions.json              # global (optional fallback; all characters)
+├── happy.svg                  # global art (optional)
+└── Alice/
+    ├── emotions.json          # Alice's own vocabulary (probed first)
+    └── happy.svg              # Alice's own art
+```
+
+Each folder is matched to a character by `mes.ch_name` (the character's display name). Characters without a vocabulary are left untouched.
 
 ## For extension developers: the ST message contract
 
@@ -107,7 +128,8 @@ These cost us a debugging session — save yours (verified on ST 1.18.x):
 
 ## Troubleshooting
 
-- **No segments at all** → check the extension is enabled in the Extensions panel (a disabled entry persists server-side in `settings.json → extension_settings.disabledExtensions`; a hard refresh won't fix that). Then check the console for `[emotionRails]` logs and make sure `${baseUrl}emotions.json` returns HTTP 200.
+- **No segments at all** → check the extension is enabled in the Extensions panel (a disabled entry persists server-side in `settings.json → extension_settings.disabledExtensions`; a hard refresh won't fix that). Then check the console for `[emotionRails]` logs and make sure `${baseUrl}emotions.json` (or the character's own folder) returns HTTP 200.
+- **One character shows raw tags while others work** → that character has no vocabulary (no `${baseUrl}<character>/emotions.json`, no global index). Add one, or give the character its own folder. This is the "leave untouched" behavior by design.
 - **Only the first segment has an avatar** → the page is probably still serving a cached older build; hard-refresh (**Ctrl+F5**) after updating (or clear the service-worker cache).
 - **Tags stay visible** → the first node of the line is not a plain text node (rare). The extension hides whole-element tags as a fallback; report it with an `outerHTML` sample.
 - **Segments come back after a swipe but text is doubled** → another extension rewrote `.mes_text` without preserving markers; check their re-render order (ours re-renders 500 ms after any change).
@@ -123,6 +145,12 @@ Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an
 # 中文说明
 
 **在 SillyTavern 里，按角色台词行首的 `[情绪词]` 标签，将消息渲染成"每段头像+词标签 | 台词气泡"的贴正文分段样式。**
+
+## v2.1.0：多角色词表 + 缺图空白占位
+
+- **多角色**：每条消息按 `mes.ch_name` 解析词表——先探测 `${baseUrl}<角色名>/emotions.json`（及其图片），再回退全局 `${baseUrl}emotions.json`；两者都没有则该角色消息**完全不介入**（保持 ST 默认渲染）。词表按角色缓存；设置 `perCharacter: false` 可只用全局词表。
+- **缺图不映射**：词表内某词的图片文件 404 时，该段显示**空白占位图**（内联 SVG，无网络请求），而不是借用其它词的头像；词标签仍显示本来的词。
+- 词表 `img` 值支持**绝对 URL / data: URI**（原样使用，便于内联示例图或走图床）。
 
 ## v2.0.0：从侧栏 rail 改为贴正文分段
 
@@ -179,7 +207,7 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 }
 ```
 
-- `<词>`：与方括号里写的字面一致；值为 `{ "img": "相对 baseUrl 的路径" }`
+- `<词>`：与方括号里写的字面一致；值为 `{ "img": "相对 baseUrl 的路径" }`——绝对 `http(s):`/`data:`/`blob:` URL 原样使用
 - `aliases`：别名 → 规范词（模型输出 `[激动]` 但你只有「开心」的图时很有用）
 - `fallback`：无标签行与未识别词的兜底词（设置里的 `defaultWord` 可覆盖它）
 
@@ -190,13 +218,28 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 | 键 | 默认 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 总开关 |
-| `baseUrl` | `/user/images/emotion-rails/` | `emotions.json` 与图片所在目录 |
+| `baseUrl` | `/user/images/emotion-rails/` | `emotions.json` 与图片所在目录；角色子目录放其下 |
 | `index` | `emotions.json` | 索引文件名 |
+| `perCharacter` | `true` | 先探测 `${baseUrl}<角色名>/emotions.json`，没有则回退全局 |
 | `defaultWord` | *(空)* | 覆盖 JSON 里的 `fallback` |
 | `showChip` | `true` | 头像下方显示情绪词标签 |
 | `size` | `84` | 段头像边长(px) |
 | `hideStAvatar` | `true` | 分段消息上隐藏 ST 常驻左侧头像 |
 | `bubble` | `true` | 台词气泡背景 |
+| `placeholder` | `true` | 图片缺失显示空白占位（不映射到其它词头像） |
+
+**多角色目录布局**（`perCharacter: true` 时）：
+
+```
+data/<用户>/images/emotion-rails/
+├── emotions.json              # 全局（可选，所有角色兜底）
+├── happy.svg                  # 全局图（可选）
+└── Alice/
+    ├── emotions.json          # Alice 自己的词表（优先探测）
+    └── happy.svg              # Alice 自己的图
+```
+
+文件夹按 `mes.ch_name`（角色显示名）匹配；没有词表的角色消息保持 ST 原样不介入。
 
 ## 写给扩展开发者：ST 消息契约（1.18.x 实测）
 
@@ -210,7 +253,8 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 
 ## 排障
 
-- **完全不显示** → 先看扩展面板是否被禁用（禁用状态持久化在服务器 `settings.json` 的 `disabledExtensions` 里，硬刷新无效）；再看 console 有没有 `[emotionRails]` 日志；最后确认 `${baseUrl}emotions.json` 返回 200。
+- **完全不显示** → 先看扩展面板是否被禁用（禁用状态持久化在服务器 `settings.json` 的 `disabledExtensions` 里，硬刷新无效）；再看 console 有没有 `[emotionRails]` 日志；最后确认 `${baseUrl}emotions.json`（或该角色的子目录）返回 200。
+- **别的角色都正常、某角色标签原样显示** → 该角色没有词表（既无 `${baseUrl}<角色名>/emotions.json` 也无全局索引）。补一份，或给它建自己的文件夹——这是"无词表不介入"的设计行为。
 - **只有第一段有头像** → 页面很可能还在执行旧版缓存脚本；升级后 **Ctrl+F5** 硬刷新（或临时清一次 service worker 缓存）。
 - **标签仍显示在正文里** → 该行首节点不是纯文本节点（少见）；扩展会作整元素隐藏兜底；如仍复现请附带 `outerHTML` 片段反馈。
 - **滑动后分段回来了但正文重复** → 别的扩展重写了 `.mes_text` 且没保留标记；我们会在任何变更后 500ms 自动重排，检查两者的事件顺序。

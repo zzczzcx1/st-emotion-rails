@@ -1,29 +1,29 @@
 /*!
- * Emotion Rails (st-emotion-rails) v2.0.0
+ * Emotion Rails (st-emotion-rails) v2.1.0
  * Renders a per-segment emotion avatar beside character messages in
  * SillyTavern, driven by [emotion-word] tags at line starts.
  *
- * v2.0.0 (seg mode): replaces the v1 sidebar rail with a "tag-aligned
- * segment" layout — each tagged line (plus any untagged narration that
- * follows it) becomes one segment rendered as:
- *
- *     [emotion avatar + word label] | [speech bubble]
- *
- * so every avatar sits exactly beside its own lines (the v1 rail could
- * drift from the text because it was a single left-float column with
- * fixed pitch while paragraphs varied in height). Tag lines and their
- * trailing narration are grouped per segment; the leading bracket groups
- * ([word] or [name][word][scene]) are hidden from display (moved into a
- * hidden span) WITHOUT touching the underlying chat data.
+ * v2.1.0 (multi-character + missing-art placeholders):
+ *  - PER-CHARACTER vocabularies: settings.baseUrl may hold per-character
+ *    subfolders — `${baseUrl}<character-name>/emotions.json` (+ images) is
+ *    probed first for each message (keyed by mes.ch_name), falling back to
+ *    the global `${baseUrl}emotions.json`; if neither exists the character's
+ *    messages are left untouched (ST default rendering, zero interference).
+ *    Vocabularies are cached per character with in-flight dedupe.
+ *  - MISSING ART: an emotion word whose image 404s shows a blank placeholder
+ *    (inline SVG data URI, no network) instead of being remapped to another
+ *    word's avatar. Untagged/unknown-word lines still use the vocabulary
+ *    fallback chain (defaultWord → JSON fallback → first word of that
+ *    character's list).
+ *  - Same segment layout as v2.0.0 ([avatar + word label] | [speech bubble],
+ *    one per tagged line; trailing narration joins the segment; leading
+ *    bracket groups hidden from display without touching chat data).
  *
  * Coexistence with extensions that rewrite .mes_text (e.g. per-sentence
- * TTS players): rendering is idempotent (dataset hash guard) and a
- * MutationObserver re-renders a message when something else rewrites
- * it; during streaming generation the observer is suspended so the
- * typewriter is never interrupted.
- *
- * Word list, image mapping and aliases are all loaded at runtime from a
- * single emotions.json — add/remove emotions without touching code.
+ * TTS players): idempotent rendering (dataset hash guard) and a
+ * MutationObserver re-renders a message when something else rewrites it;
+ * during streaming generation the observer is suspended so the typewriter
+ * is never interrupted.
  *
  * SillyTavern message-contract notes (verified on ST 1.18.x):
  *  - CHARACTER_MESSAGE_RENDERED / MESSAGE_EDITED / MESSAGE_SWIPED emit
@@ -31,10 +31,10 @@
  *  - Chat items have NO `id` field; the array index IS the message id.
  *  - Message blocks locate by bare attribute `.mes[mesid="<index>"]`
  *    (no data-* attributes). GENERATION_ENDED passes chat.length.
- *  - A key one: messageFormatting renders EACH LINE AS A <p> ELEMENT
- *    (showdown simpleLineBreaks handles in-line \n only; blank lines
- *    delimit paragraphs) — there are NO <br> children at the .mes_text
- *    top level. Both shapes are handled by the row splitter.
+ *  - messageFormatting renders EACH LINE AS A <p> ELEMENT (showdown
+ *    simpleLineBreaks handles in-line \n only; blank lines delimit
+ *    paragraphs) — there are NO <br> children at the .mes_text top level.
+ *    Both shapes are handled by the row splitter.
  *  - Loading an existing chat does NOT fire render events — re-scan the
  *    whole chat on CHAT_CHANGED / startup.
  */
@@ -47,10 +47,19 @@ const MODULE = 'emotionRails';
 /* One or more leading bracket groups: [happy] or [Name][happy][scene] ... */
 const TAG_ROW_RE = /^(\[[^\[\]]{1,12}\]\s*)+/;
 
-let EMOTIONS = {};        // { word: {img} }
-let ALIASES = {};         // { alias: canonical word }
-let EMOTION_KEYS = [];
-let FALLBACK_WORD = null; // settings.defaultWord > json.fallback > first key
+/* Blank placeholder shown when an emotion's image file is missing
+   (inline SVG — no network request, cannot be confused with real art) */
+const PLACEHOLDER_SRC = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" rx="14" fill="rgba(128,128,140,.10)" stroke="rgba(128,128,140,.25)"/></svg>'
+);
+
+/*
+ * Vocabulary store: one entry per character ('' = the global list).
+ * entry: { emotions, aliases, keys, fallback } or null (= nothing available
+ * for that character / global base -> message left untouched).
+ */
+const INDEX_CACHE = new Map();
+const INFLIGHT = new Map();
 let observer = null;
 let debounceTimer = null;
 let streaming = false;
@@ -60,11 +69,13 @@ function defaultSettings() {
         enabled: true,
         baseUrl: '/user/images/emotion-rails/',
         index: 'emotions.json',
-        defaultWord: '',      // language-neutral: resolved via FALLBACK_WORD
+        perCharacter: true,   // probe ${baseUrl}<character>/emotions.json first
+        defaultWord: '',      // language-neutral: resolved per vocabulary
         showChip: true,       // show the word label under each avatar
         size: 84,             // segment avatar size in px
         hideStAvatar: true,   // hide ST's persistent left avatar (each segment has its own)
         bubble: true,         // speech-bubble background behind segment text
+        placeholder: true,    // missing art -> blank placeholder (never remap)
     };
 }
 
@@ -73,56 +84,91 @@ function getExtensionSettings(name) {
     return Object.assign({}, defaultSettings(), extension_settings?.[name] ?? {});
 }
 
-async function loadIndex() {
-    const s = getExtensionSettings(MODULE);
-    try {
-        const r = await fetch(`${s.baseUrl}${s.index}`, { cache: 'no-cache' });
-        if (!r.ok) throw new Error('index HTTP ' + r.status);
-        const data = await r.json();
-        EMOTIONS = {};
-        ALIASES = data.aliases || {};
-        for (const [k, v] of Object.entries(data)) {
-            if (k !== 'aliases' && k !== 'fallback' && v && v.img) EMOTIONS[k] = v;
-        }
-        EMOTION_KEYS = Object.keys(EMOTIONS);
-        FALLBACK_WORD = [s.defaultWord, data.fallback, EMOTION_KEYS[0]]
-            .find(w => w && EMOTIONS[w]) || null;
-        console.info(`[${MODULE}] emotion index loaded: ${EMOTION_KEYS.length} words, ${Object.keys(ALIASES).length} aliases`);
-        return true;
-    } catch (e) {
-        console.warn(`[${MODULE}] emotion index load failed:`, e.message);
-        EMOTIONS = {}; ALIASES = {}; EMOTION_KEYS = []; FALLBACK_WORD = null;
-        return false;
+/* Character-name -> safe path segment (strip filesystem-hostile chars) */
+function normalizeName(name) {
+    return String(name ?? '').trim().replace(/[\\/:*?"<>|]/g, '_');
+}
+
+async function fetchJSON(url) {
+    const r = await fetch(url, { cache: 'no-cache' });
+    if (!r.ok) return null;
+    try { return await r.json(); } catch (e) { return null; }
+}
+
+function parseIndex(data) {
+    if (!data) return null;
+    const emotions = {};
+    for (const [k, v] of Object.entries(data)) {
+        if (k !== 'aliases' && k !== 'fallback' && v && v.img) emotions[k] = v;
     }
+    return {
+        emotions,
+        aliases: data.aliases || {},
+        keys: Object.keys(emotions),
+        fallback: data.fallback || null,
+    };
+}
+
+/**
+ * Resolve (and cache) the vocabulary for one character.
+ * charKey '' = global list. Per-character probe first (if enabled), then
+ * the global list; null = nothing available (skip that character entirely).
+ */
+function getIndex(charKey, s) {
+    if (INDEX_CACHE.has(charKey)) return Promise.resolve(INDEX_CACHE.get(charKey));
+    if (INFLIGHT.has(charKey)) return INFLIGHT.get(charKey);
+    const p = (async () => {
+        let idx = null;
+        if (charKey && s.perCharacter !== false) {
+            try {
+                idx = parseIndex(await fetchJSON(`${s.baseUrl}${encodeURIComponent(charKey)}/${s.index}`));
+            } catch (e) { idx = null; }
+        }
+        if (!idx) {
+            try {
+                idx = parseIndex(await fetchJSON(`${s.baseUrl}${s.index}`));
+            } catch (e) { idx = null; }
+        }
+        INDEX_CACHE.set(charKey, idx);
+        return idx;
+    })();
+    INFLIGHT.set(charKey, p);
+    p.finally(() => INFLIGHT.delete(charKey));
+    return p;
+}
+
+/* Fallback word for a vocabulary: setting > json fallback > first word */
+function fallbackOf(idx, s) {
+    return [s.defaultWord, idx.fallback, idx.keys[0]]
+        .find(w => w && idx.emotions[w]) || null;
 }
 
 /* First bracket group that hits the whitelist (or an alias, mapped back to
-   its canonical word). */
-function findEmotion(text) {
+   its canonical word) of the GIVEN vocabulary */
+function findEmotion(text, idx) {
     const groups = String(text).match(/\[([^\[\]]{1,12})\]/g) || [];
     for (const g of groups) {
         const w = g.slice(1, -1).trim();
-        if (!w) continue;
-        if (EMOTION_KEYS.includes(w)) return w;
-        if (ALIASES[w] && EMOTIONS[ALIASES[w]]) return ALIASES[w];
+        if (!w || !idx) continue;
+        if (idx.emotions[w]) return w;
+        if (idx.aliases[w] && idx.emotions[idx.aliases[w]]) return idx.aliases[w];
     }
     return null;
 }
 
 function imgUrl(word, s) {
-    const e = EMOTIONS[word] || {};
-    return `${s.baseUrl}${e.img || encodeURIComponent(word) + '.png'}`;
+    const e = s.idx.emotions[word] || {};
+    const rel = e.img || encodeURIComponent(word) + '.png';
+    /* Absolute URLs / data URIs in the word list are used as-is */
+    return (/^(https?:|data:|blob:)/i.test(rel)) ? rel : `${s.baseUrl}${rel}`;
 }
 
 /* ---------- DOM segmentation ---------- */
 
 /**
  * Split .mes_text top-level children into "rows".
- * ST renders one <p> per line (see header notes); the streaming typewriter
- * intermediate shape may be [text, <br>, text, ...] instead. Both supported:
- *  - <p> block: its children form one row (inner <br>s split it further);
- *    <p> is a paragraph boundary, so there are no "blank rows" in this shape.
- *  - <br>: row break; consecutive <br>s produce empty rows (dropped later).
+ * ST renders one <p> per line; the streaming typewriter intermediate shape
+ * may be [text, <br>, text, ...] instead. Both supported.
  */
 function collectRows(mesTextEl) {
     const rows = [];
@@ -176,7 +222,7 @@ function isEmptyRow(nodes) {
  * rows (narration/blank) join it; narration at the head of the message is
  * merged into the first segment; trailing blank rows are dropped.
  */
-function splitRows(rows) {
+function splitRows(rows, idx) {
     const segs = [];
     const trimTail = () => {
         const last = segs[segs.length - 1];
@@ -185,7 +231,7 @@ function splitRows(rows) {
     for (const nodes of rows) {
         if (isTagRow(nodes)) {
             trimTail();
-            segs.push({ word: findEmotion(rowText(nodes)), head: nodes, more: [] });
+            segs.push({ word: findEmotion(rowText(nodes), idx), head: nodes, more: [] });
         } else if (segs.length) {
             segs[segs.length - 1].more.push(nodes);
         } else if (!isEmptyRow(nodes)) {
@@ -231,7 +277,8 @@ function hideTagPrefix(nodes, target) {
 
 /* Build one segment (avatar column + speech body) into frag */
 function buildSeg(seg, s, frag) {
-    const word = (seg.word && EMOTION_KEYS.includes(seg.word)) ? seg.word : FALLBACK_WORD;
+    const fb = fallbackOf(s.idx, s);
+    const word = (seg.word && s.idx.emotions[seg.word]) ? seg.word : fb;
     if (!word) return;
     const segEl = document.createElement('div');
     segEl.className = 'er-seg';
@@ -244,6 +291,11 @@ function buildSeg(seg, s, frag) {
     img.width = img.height = Number(s.size) || 84;
     img.draggable = false;
     img.alt = word;
+    if (s.placeholder !== false) {
+        /* Missing art never remaps: blank placeholder instead */
+        const fallbackSrc = PLACEHOLDER_SRC;
+        img.onerror = () => { img.onerror = null; img.src = fallbackSrc; img.title = word + ' (missing art)'; };
+    }
     ava.appendChild(img);
     if (s.showChip) {
         const lab = document.createElement('span');
@@ -279,21 +331,26 @@ function simpleHash(t) {
 
 /**
  * Idempotently render one character message by array index.
- * Hash from chat text (edit/swipe/generation changes it -> rebuild);
- * already rendered with the same hash -> skip; rewritten by another
- * extension (.er-seg lost) -> rebuild.
+ * Resolves the character's vocabulary first (per-character probe -> global
+ * fallback -> skip if none), then re-segments .mes_text.
  */
-function renderMes(messageIndex, force = false) {
+async function renderMes(messageIndex, force = false) {
     const i = Number(messageIndex);
     if (!Number.isInteger(i) || i < 0) return;
     const s = getExtensionSettings(MODULE);
-    if (!s.enabled || !EMOTION_KEYS.length || !FALLBACK_WORD) return;
-    let mes, el;
+    if (!s.enabled) return;
+    let mes;
     try {
         mes = (getContext().chat ?? [])[i];
     } catch (e) { return; }
     if (!mes || mes.is_user || mes.is_system) return;
-    el = document.querySelector(`.mes[mesid="${i}"]`);
+    const charKey = normalizeName(mes.ch_name ?? '');
+    const idx = await getIndex(charKey, s);
+    if (!idx || !idx.keys.length) return;      /* no vocab for this character: leave as-is */
+    const st = Object.assign({}, s, { idx });
+    if (st.placeholder === false) delete st.placeholder;
+
+    const el = document.querySelector(`.mes[mesid="${i}"]`);
     if (!el) return;
     const mesText = el.querySelector('.mes_text');
     if (!mesText) return;
@@ -305,10 +362,10 @@ function renderMes(messageIndex, force = false) {
     try {
         const rows = collectRows(mesText);
         if (!rows.some(isTagRow)) return;      /* plain narration: leave as-is */
-        const segs = splitRows(rows);
+        const segs = splitRows(rows, idx);
         if (!segs.length) return;
         const frag = document.createDocumentFragment();
-        for (const segItem of segs) buildSeg(segItem, s, frag);
+        for (const segItem of segs) buildSeg(segItem, st, frag);
 
         /* Preserve datasets (other extensions' markers, e.g. TTS state) */
         const ds = Object.assign({}, mesText.dataset);
@@ -321,7 +378,7 @@ function renderMes(messageIndex, force = false) {
 }
 
 function renderAll() {
-    if (streaming || !EMOTION_KEYS.length) return;
+    if (streaming) return;
     let chat;
     try { chat = getContext().chat ?? []; } catch (e) { return; }
     for (let i = 0; i < chat.length; i++) {
@@ -369,11 +426,9 @@ function startObserver() {
 }
 
 async function start() {
-    await loadIndex();
-    if (!FALLBACK_WORD) {
-        console.warn(`[${MODULE}] no usable words; check baseUrl/index settings`);
-        return;
-    }
+    const s = getExtensionSettings(MODULE);
+    if (!s.enabled) return;
+    await getIndex('', s);                    /* warm the global list */
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageEvent);
     eventSource.on(event_types.MESSAGE_EDITED, onMessageEvent);
     eventSource.on(event_types.MESSAGE_SWIPED, onMessageEvent);
@@ -382,11 +437,11 @@ async function start() {
     eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
     eventSource.on(event_types.CHAT_CHANGED, () => {
         streaming = false;
-        loadIndex().then(scheduleRenderAll);
+        getIndex('', getExtensionSettings(MODULE)).then(scheduleRenderAll);
     });
     startObserver();
     scheduleRenderAll();
-    console.info(`[${MODULE}] ready (seg mode), words=${EMOTION_KEYS.length}`);
+    console.info(`[${MODULE}] ready (seg mode, per-character), global=${INDEX_CACHE.get('') ? 'yes' : 'no'}`);
 }
 
 start().catch(e => console.error(`[${MODULE}] init error:`, e));
