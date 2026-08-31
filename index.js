@@ -1,7 +1,10 @@
 /*!
- * Emotion Rails (st-emotion-rails) v2.1.0
+ * Emotion Rails (st-emotion-rails) v2.1.1
  * Renders a per-segment emotion avatar beside character messages in
  * SillyTavern, driven by [emotion-word] tags at line starts.
+ *
+ * v2.1.1 fixes per-character asset URLs, settings-backed visual toggles,
+ * cache isolation, and formatted leading-tag hiding.
  *
  * v2.1.0 (multi-character + missing-art placeholders):
  *  - PER-CHARACTER vocabularies: settings.baseUrl may hold per-character
@@ -45,7 +48,8 @@ import { eventSource, event_types } from '../../../events.js';
 const MODULE = 'emotionRails';
 
 /* One or more leading bracket groups: [happy] or [Name][happy][scene] ... */
-const TAG_ROW_RE = /^(\[[^\[\]]{1,12}\]\s*)+/;
+const TAG_ROW_RE = /^(\[[^\[\]]{1,64}\]\s*)+/;
+const TAG_GROUP_RE = /\[[^\[\]]{1,64}\]/g;
 
 /* Blank placeholder shown when an emotion's image file is missing
    (inline SVG — no network request, cannot be confused with real art) */
@@ -60,6 +64,7 @@ const PLACEHOLDER_SRC = 'data:image/svg+xml,' + encodeURIComponent(
  */
 const INDEX_CACHE = new Map();
 const INFLIGHT = new Map();
+const PENDING_IDS = new Set();
 let observer = null;
 let debounceTimer = null;
 let streaming = false;
@@ -89,23 +94,44 @@ function normalizeName(name) {
     return String(name ?? '').trim().replace(/[\\/:*?"<>|]/g, '_');
 }
 
+function normalizeBaseUrl(value) {
+    const base = String(value ?? '').trim() || defaultSettings().baseUrl;
+    return base.endsWith('/') ? base : `${base}/`;
+}
+
+function indexName(s) {
+    return String(s.index || 'emotions.json').replace(/^\/+/, '');
+}
+
+function cacheKey(charKey, s) {
+    return JSON.stringify([
+        normalizeBaseUrl(s.baseUrl),
+        indexName(s),
+        s.perCharacter !== false,
+        charKey,
+    ]);
+}
+
 async function fetchJSON(url) {
     const r = await fetch(url, { cache: 'no-cache' });
     if (!r.ok) return null;
     try { return await r.json(); } catch (e) { return null; }
 }
 
-function parseIndex(data) {
-    if (!data) return null;
+function parseIndex(data, baseUrl) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
     const emotions = {};
     for (const [k, v] of Object.entries(data)) {
-        if (k !== 'aliases' && k !== 'fallback' && v && v.img) emotions[k] = v;
+        if (k !== 'aliases' && k !== 'fallback' && v && typeof v.img === 'string' && v.img.trim()) emotions[k] = v;
     }
+    const keys = Object.keys(emotions);
+    if (!keys.length) return null;
     return {
         emotions,
-        aliases: data.aliases || {},
-        keys: Object.keys(emotions),
+        aliases: data.aliases && typeof data.aliases === 'object' && !Array.isArray(data.aliases) ? data.aliases : {},
+        keys,
         fallback: data.fallback || null,
+        baseUrl: normalizeBaseUrl(baseUrl),
     };
 }
 
@@ -115,38 +141,47 @@ function parseIndex(data) {
  * the global list; null = nothing available (skip that character entirely).
  */
 function getIndex(charKey, s) {
-    if (INDEX_CACHE.has(charKey)) return Promise.resolve(INDEX_CACHE.get(charKey));
-    if (INFLIGHT.has(charKey)) return INFLIGHT.get(charKey);
+    const key = cacheKey(charKey, s);
+    if (INDEX_CACHE.has(key)) return Promise.resolve(INDEX_CACHE.get(key));
+    if (INFLIGHT.has(key)) return INFLIGHT.get(key);
     const p = (async () => {
         let idx = null;
+        const globalBase = normalizeBaseUrl(s.baseUrl);
+        const filename = indexName(s);
         if (charKey && s.perCharacter !== false) {
+            const characterBase = `${globalBase}${encodeURIComponent(charKey)}/`;
             try {
-                idx = parseIndex(await fetchJSON(`${s.baseUrl}${encodeURIComponent(charKey)}/${s.index}`));
+                idx = parseIndex(await fetchJSON(`${characterBase}${filename}`), characterBase);
             } catch (e) { idx = null; }
         }
         if (!idx) {
             try {
-                idx = parseIndex(await fetchJSON(`${s.baseUrl}${s.index}`));
+                idx = parseIndex(await fetchJSON(`${globalBase}${filename}`), globalBase);
             } catch (e) { idx = null; }
         }
-        INDEX_CACHE.set(charKey, idx);
+        INDEX_CACHE.set(key, idx);
         return idx;
     })();
-    INFLIGHT.set(charKey, p);
-    p.finally(() => INFLIGHT.delete(charKey));
+    INFLIGHT.set(key, p);
+    p.finally(() => INFLIGHT.delete(key));
     return p;
 }
 
 /* Fallback word for a vocabulary: setting > json fallback > first word */
 function fallbackOf(idx, s) {
-    return [s.defaultWord, idx.fallback, idx.keys[0]]
-        .find(w => w && idx.emotions[w]) || null;
+    for (const word of [s.defaultWord, idx.fallback, idx.keys[0]]) {
+        if (word && idx.emotions[word]) return word;
+        const canonical = word && idx.aliases[word];
+        if (canonical && idx.emotions[canonical]) return canonical;
+    }
+    return null;
 }
 
 /* First bracket group that hits the whitelist (or an alias, mapped back to
    its canonical word) of the GIVEN vocabulary */
 function findEmotion(text, idx) {
-    const groups = String(text).match(/\[([^\[\]]{1,12})\]/g) || [];
+    const prefix = String(text).match(TAG_ROW_RE)?.[0] || '';
+    const groups = prefix.match(TAG_GROUP_RE) || [];
     for (const g of groups) {
         const w = g.slice(1, -1).trim();
         if (!w || !idx) continue;
@@ -159,8 +194,9 @@ function findEmotion(text, idx) {
 function imgUrl(word, s) {
     const e = s.idx.emotions[word] || {};
     const rel = e.img || encodeURIComponent(word) + '.png';
-    /* Absolute URLs / data URIs in the word list are used as-is */
-    return (/^(https?:|data:|blob:)/i.test(rel)) ? rel : `${s.baseUrl}${rel}`;
+    /* Absolute URLs / data URIs / origin-root paths are used as-is. */
+    if (/^(https?:|data:|blob:)/i.test(rel) || rel.startsWith('/')) return rel;
+    return `${s.idx.baseUrl || normalizeBaseUrl(s.baseUrl)}${rel}`;
 }
 
 /* ---------- DOM segmentation ---------- */
@@ -249,28 +285,31 @@ function splitRows(rows, idx) {
  * text content is the tag gets display:none.
  */
 function hideTagPrefix(nodes, target) {
-    const tn = nodes.find(n => n.nodeType === 3);
-    if (tn) {
-        const m = tn.textContent.match(TAG_ROW_RE);
-        if (!m || m[0].length === 0) return null;
-        const span = document.createElement('span');
-        span.className = 'er-taghide';
-        if (m[0].length === tn.textContent.length) {
-            span.appendChild(tn);
-        } else {
-            const rest = tn.splitText(m[0].length);
-            span.appendChild(tn);
-            if (rest.textContent.trim() !== '') target.appendChild(rest);
-        }
-        target.appendChild(span);
-        return tn;
-    }
     for (const n of nodes) {
+        if (n.nodeType === 3) {
+            const m = n.textContent.match(TAG_ROW_RE);
+            if (!m || m[0].length === 0) return null;
+            const span = document.createElement('span');
+            span.className = 'er-taghide';
+            if (m[0].length === n.textContent.length) {
+                span.appendChild(n);
+            } else {
+                const rest = n.splitText(m[0].length);
+                span.appendChild(n);
+                if (rest.textContent.trim() !== '') target.appendChild(rest);
+            }
+            target.appendChild(span);
+            return n;
+        }
         if (n.nodeType !== 1 || n.nodeName === 'BR') continue;
-        const t = n.textContent || '';
-        const m = t.match(TAG_ROW_RE);
-        if (!m || !m[0].length) continue;
-        if (m[0].length === t.length) { n.style.display = 'none'; return n; }
+        const text = n.textContent || '';
+        const m = text.match(TAG_ROW_RE);
+        if (!m || !m[0].length) return null;
+        if (m[0].length === text.length) {
+            n.style.display = 'none';
+            return n;
+        }
+        return null;
     }
     return null;
 }
@@ -306,7 +345,7 @@ function buildSeg(seg, s, frag) {
     segEl.appendChild(ava);
 
     const body = document.createElement('div');
-    body.className = 'er-body';
+    body.className = s.bubble === false ? 'er-body er-body--plain' : 'er-body';
     let first = true;
     const appendRow = (nodes, isHead) => {
         if (!first) body.appendChild(document.createElement('br'));
@@ -361,7 +400,10 @@ async function renderMes(messageIndex, force = false) {
 
     try {
         const rows = collectRows(mesText);
-        if (!rows.some(isTagRow)) return;      /* plain narration: leave as-is */
+        if (!rows.some(isTagRow)) {
+            el.classList.remove('er-hide-st-avatar');
+            return;                           /* plain narration: leave as-is */
+        }
         const segs = splitRows(rows, idx);
         if (!segs.length) return;
         const frag = document.createDocumentFragment();
@@ -372,6 +414,7 @@ async function renderMes(messageIndex, force = false) {
         mesText.replaceChildren(frag);
         for (const k of Object.keys(ds)) mesText.dataset[k] = ds[k];
         mesText.dataset.erHash = want;
+        el.classList.toggle('er-hide-st-avatar', st.hideStAvatar !== false);
     } catch (e) {
         console.warn(`[${MODULE}] render mes ${i} failed:`, e?.message ?? e);
     }
@@ -409,31 +452,42 @@ function startObserver() {
     if (!chatEl || observer) return;
     observer = new MutationObserver((muts) => {
         if (streaming) return;               /* suspend during typewriter */
-        const ids = new Set();
         for (const m of muts) {
             let el = m.target;
             while (el && (!el.classList || !el.classList.contains('mes'))) el = el.parentElement;
             if (el) {
                 const id = el.getAttribute('mesid');
-                if (id !== null && id !== '') ids.add(id);
+                if (id !== null && id !== '') PENDING_IDS.add(id);
+            }
+            for (const node of m.addedNodes || []) {
+                if (node.nodeType !== 1) continue;
+                const blocks = node.matches?.('.mes') ? [node] : [...(node.querySelectorAll?.('.mes') || [])];
+                for (const block of blocks) {
+                    const id = block.getAttribute('mesid');
+                    if (id !== null && id !== '') PENDING_IDS.add(id);
+                }
             }
         }
-        if (!ids.size) return;
+        if (!PENDING_IDS.size) return;
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => { for (const id of ids) renderMes(id); }, 500);
+        debounceTimer = setTimeout(() => {
+            const ids = [...PENDING_IDS];
+            PENDING_IDS.clear();
+            for (const id of ids) renderMes(id);
+        }, 500);
     });
-    observer.observe(chatEl, { childList: true, subtree: true });
+    observer.observe(chatEl, { childList: true, characterData: true, subtree: true });
 }
 
 async function start() {
     const s = getExtensionSettings(MODULE);
     if (!s.enabled) return;
-    await getIndex('', s);                    /* warm the global list */
+    const globalIndex = await getIndex('', s); /* warm the global list */
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageEvent);
     eventSource.on(event_types.MESSAGE_EDITED, onMessageEvent);
     eventSource.on(event_types.MESSAGE_SWIPED, onMessageEvent);
     eventSource.on(event_types.GENERATION_STARTED, () => { streaming = true; });
-    eventSource.on(event_types.GENERATION_STOPPED, () => { streaming = false; });
+    eventSource.on(event_types.GENERATION_STOPPED, onGenerationEnded);
     eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
     eventSource.on(event_types.CHAT_CHANGED, () => {
         streaming = false;
@@ -441,7 +495,7 @@ async function start() {
     });
     startObserver();
     scheduleRenderAll();
-    console.info(`[${MODULE}] ready (seg mode, per-character), global=${INDEX_CACHE.get('') ? 'yes' : 'no'}`);
+    console.info(`[${MODULE}] ready (seg mode, per-character), global=${globalIndex ? 'yes' : 'no'}`);
 }
 
 start().catch(e => console.error(`[${MODULE}] init error:`, e));

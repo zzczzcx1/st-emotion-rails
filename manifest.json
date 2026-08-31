@@ -6,6 +6,9 @@
   "js": "index.js",
   "css": "style.css",
   "author": "zzczzcx1",
-  "version": "2.1.0",
-  "description": "Per-segment emotion avatars aligned with their own speech lines from [emotion] tags. Multi-character: per-character vocabularies (baseUrl/<character>/emotions.json) with global fallback; missing art shows a blank placeholder instead of remapping. Word list, images and aliases come from one emotions.json per vocabulary; tags hidden from display without touching chat data. Compatible with per-sentence TTS players."
+  "version": "2.1.1",
+  "homePage": "https://github.com/zzczzcx1/st-emotion-rails",
+  "auto_update": true,
+  "minimum_client_version": "1.18.0",
+  "description": "Per-segment emotion avatars aligned with their own speech lines from [emotion] tags. Multi-character vocabularies load their index and images from baseUrl/<character>/, with global fallback; missing art shows a blank placeholder instead of remapping. Tags are hidden from display without touching chat data. Compatible with per-sentence TTS players."
 }

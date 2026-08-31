@@ -6,11 +6,18 @@ English | [中文](#中文说明)
 
 ---
 
+## v2.1.1: per-character path and settings fixes
+
+- Per-character image paths are now resolved beside that character's `emotions.json` (for example, `Alice/emotions.json` + `Alice/happy.png`). v2.1.0 incorrectly resolved relative image paths from the global root.
+- `hideStAvatar` and `bubble` now control the rendered layout as documented; character/global caches are isolated by `baseUrl`, index name and mode.
+- Formatted leading tags such as `<strong>[happy]</strong> Hello` are hidden correctly, and a late bracket in dialogue can no longer be mistaken for the leading emotion tag.
+- The manifest now advertises the project page, auto-update support and the tested minimum SillyTavern version.
+
 ## v2.1.0: multi-character vocabularies + missing-art placeholders
 
 - **Per-character**: each message resolves its vocabulary from `mes.ch_name` — `${baseUrl}<character>/emotions.json` (+ its image files) is probed first, then the global `${baseUrl}emotions.json`; if neither exists the character's messages are left completely untouched (ST default rendering). Vocabularies are cached per character; set `perCharacter: false` to use the global list only.
 - **Missing art never remaps**: when a word's image file 404s, the segment shows a blank placeholder (inline SVG, no network) instead of borrowing another word's avatar. The word label still shows the intended word.
-- Word-list `img` values may be absolute URLs or `data:` URIs — used as-is (handy for inline mock art or asset CDNs).
+- Word-list `img` values may be absolute/root-relative URLs or `data:` URIs — used as-is (handy for inline mock art or asset CDNs).
 
 ## v2.0.0: from sidebar rail to tag-aligned segments
 
@@ -80,7 +87,7 @@ Manual alternative: clone into `data/<user-handle>/extensions/st-emotion-rails/`
 
 | Key | Meaning |
 |---|---|
-| `<word>` | Emotion word exactly as used inside `[...]`. Value: `{ "img": "<path relative to baseUrl>" }` — absolute `http(s):`/`data:`/`blob:` URLs are used as-is |
+| `<word>` | Emotion word exactly as used inside `[...]`. Value: `{ "img": "<path relative to the selected emotions.json folder>" }` — absolute `http(s):`/`data:`/`blob:` and origin-root (`/...`) URLs are used as-is |
 | `aliases` | Extra words mapped to a canonical word (e.g. the model writes `[excited]` but you only have art for `happy`) |
 | `fallback` | Word used for untagged lines and unrecognized words (overridden by the `defaultWord` setting if set) |
 
@@ -136,6 +143,8 @@ These cost us a debugging session — save yours (verified on ST 1.18.x):
 
 Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an issue is appreciated.
 
+For a dependency-free core regression check, run `node --test tests/core.test.mjs` from the repository root.
+
 ## License
 
 [MIT](LICENSE)
@@ -146,11 +155,18 @@ Tested on SillyTavern **1.18.x**. If it works (or breaks) on another version, an
 
 **在 SillyTavern 里，按角色台词行首的 `[情绪词]` 标签，将消息渲染成"每段头像+词标签 | 台词气泡"的贴正文分段样式。**
 
+## v2.1.1：角色路径与设置修复
+
+- 角色专属词表内的相对图片路径现在会正确相对于该角色目录解析（例如 `Alice/emotions.json` + `Alice/happy.png`）；v2.1.0 会错误地去全局根目录找图。
+- `hideStAvatar` 与 `bubble` 现在会按文档真正控制布局；角色/全局缓存按 `baseUrl`、索引名和模式隔离。
+- `<strong>[开心]</strong> 台词` 这类带格式的行首标签可以正确隐藏，台词后部出现的方括号也不会再被误判成行首情绪。
+- manifest 已补齐项目主页、自动更新和最低 SillyTavern 版本信息。
+
 ## v2.1.0：多角色词表 + 缺图空白占位
 
 - **多角色**：每条消息按 `mes.ch_name` 解析词表——先探测 `${baseUrl}<角色名>/emotions.json`（及其图片），再回退全局 `${baseUrl}emotions.json`；两者都没有则该角色消息**完全不介入**（保持 ST 默认渲染）。词表按角色缓存；设置 `perCharacter: false` 可只用全局词表。
 - **缺图不映射**：词表内某词的图片文件 404 时，该段显示**空白占位图**（内联 SVG，无网络请求），而不是借用其它词的头像；词标签仍显示本来的词。
-- 词表 `img` 值支持**绝对 URL / data: URI**（原样使用，便于内联示例图或走图床）。
+- 词表 `img` 值支持**绝对/站点根路径 URL 与 data: URI**（原样使用，便于内联示例图或走图床）。
 
 ## v2.0.0：从侧栏 rail 改为贴正文分段
 
@@ -207,7 +223,7 @@ v1 版把表情 chip 渲染成消息左侧一整列浮块（rail）；因为 chi
 }
 ```
 
-- `<词>`：与方括号里写的字面一致；值为 `{ "img": "相对 baseUrl 的路径" }`——绝对 `http(s):`/`data:`/`blob:` URL 原样使用
+- `<词>`：与方括号里写的字面一致；值为 `{ "img": "相对当前 emotions.json 所在目录的路径" }`——绝对 `http(s):`/`data:`/`blob:` 与站点根路径（`/...`）URL 原样使用
 - `aliases`：别名 → 规范词（模型输出 `[激动]` 但你只有「开心」的图时很有用）
 - `fallback`：无标签行与未识别词的兜底词（设置里的 `defaultWord` 可覆盖它）
 
@@ -260,6 +276,8 @@ data/<用户>/images/emotion-rails/
 - **滑动后分段回来了但正文重复** → 别的扩展重写了 `.mes_text` 且没保留标记；我们会在任何变更后 500ms 自动重排，检查两者的事件顺序。
 
 已在 SillyTavern **1.18.x** 实测；其它版本欢迎反馈 issue。
+
+无需安装依赖的核心回归检查：在仓库根目录运行 `node --test tests/core.test.mjs`。
 
 ## 许可
 

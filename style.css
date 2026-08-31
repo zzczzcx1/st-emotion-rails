@@ -1,7 +1,7 @@
-/* Emotion Rails v2.0.0 — segmented "tag-aligned" layout */
+/* Emotion Rails v2.1.1 — segmented "tag-aligned" layout */
 /* Hide ST's persistent left avatar when a message carries our segments
    (each segment already has its own emotion avatar) */
-.mes:has(> .mes_block > .mes_text > .er-seg) .mesAvatarWrapper { display: none; }
+.mes.er-hide-st-avatar .mesAvatarWrapper { display: none; }
 
 .er-seg {
     display: flex;
@@ -50,8 +50,13 @@
     min-width: 0;
     border-radius: 10px;
     padding: 6px 10px;
-    background: rgb(from var(--SmartThemeQuoteColor, #7b7b8a) r g b / .07);
     background: rgba(123, 123, 138, .07); /* fallback for older engines */
+    background: rgb(from var(--SmartThemeQuoteColor, #7b7b8a) r g b / .07);
+}
+
+.er-body--plain {
+    padding: 0;
+    background: transparent;
 }
 
 .er-taghide {
